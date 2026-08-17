@@ -2,40 +2,51 @@ pico-8 cartridge // http://www.pico-8.com
 version 42
 __lua__
 -- =============================================
--- classic snake in pico-8
+-- snake - pico-8 (single file edition)
+-- =============================================
+
+-- sprite constants
+SPR_HEAD_RIGHT = 1
+SPR_HEAD_UP    = 2
+SPR_HEAD_DOWN  = 3
+SPR_HEAD_LEFT  = 4
+SPR_BODY       = 5
+SPR_TAIL       = 6
+SPR_APPLE      = 7
+SPR_GOLDEN     = 8
+SPR_DEAD_HEAD  = 9
+SPR_TROPHY     = 10
+SPR_WALL       = 11
+
+-- =============================================
+-- 1. initialization & state management
 -- =============================================
 
 function _init()
-    cartdata("kw_snake_game_pico8_v1")
+    cartdata("kw_snake_p8_edu_v1")
     high_score = dget(0) or 0
 
-    state = "title" -- "title", "play", "gameover"
-    grid_w = 30
-    grid_h = 26
-    cell_sz = 4
-    ox = 4
-    oy = 14
+    -- grid dimensions (8x8 pixel cells)
+    cell_sz = 8
+    grid_w = 14
+    grid_h = 13
+    ox = 8
+    oy = 16
 
-    particles = {}
-    title_snake = {}
-    init_title_snake()
+    state = "title" -- "title", "play", "gameover"
     t = 0
     shake = 0
+    particles = {}
+
+    init_title_anim()
 end
 
 function start_new_game()
-    snake = {
-        {x = 15, y = 13},
-        {x = 14, y = 13},
-        {x = 13, y = 13}
-    }
-    dx = 1
-    dy = 0
-    input_q = {}
+    init_snake()
 
     score = 0
     apples_eaten = 0
-    base_delay = 7
+    base_delay = 10 -- 10 frames per grid step at 60fps
     move_delay = base_delay
     move_timer = 0
 
@@ -50,26 +61,26 @@ function start_new_game()
     state = "play"
 end
 
-function init_title_snake()
+function init_title_anim()
     title_snake = {}
-    for i = 1, 10 do
-        add(title_snake, {x = 32 - i * 2, y = 92})
+    for i = 1, 8 do
+        add(title_snake, {x = 30 - i * 6, y = 88})
     end
 end
 
 -- =============================================
--- update loop (60 fps)
+-- 2. main game loop (_update60 & _draw)
 -- =============================================
+
 function _update60()
     t += 1
 
-    -- screen shake decay
+    -- update particles & screen shake
+    update_particles()
     if shake > 0 then
         shake *= 0.85
         if (shake < 0.2) shake = 0
     end
-
-    update_particles()
 
     if state == "title" then
         update_title()
@@ -81,12 +92,11 @@ function _update60()
 end
 
 function update_title()
-    -- animate title snake
     for i = 1, #title_snake do
         local s = title_snake[i]
-        s.x = (s.x + 0.6)
-        s.y = 90 + sin((t + i * 8) / 40) * 3
-        if (s.x > 132) s.x = -4
+        s.x += 0.8
+        s.y = 86 + sin((t + i * 10) / 45) * 4
+        if (s.x > 136) s.x = -8
     end
 
     if btnp(4) or btnp(5) then
@@ -96,13 +106,13 @@ function update_title()
 end
 
 function update_play()
-    -- capture directional inputs (queue up to 2 commands for responsive cornering)
+    -- input polling (queue up to 2 commands for responsive cornering)
     if btnp(0) then queue_dir(-1, 0) end -- left
     if btnp(1) then queue_dir(1, 0)  end -- right
     if btnp(2) then queue_dir(0, -1) end -- up
     if btnp(3) then queue_dir(0, 1)  end -- down
 
-    -- boost speed while holding ❎
+    -- speed boost dash while holding ❎
     local current_delay = move_delay
     if btn(5) then
         current_delay = max(2, flr(move_delay / 2))
@@ -114,24 +124,49 @@ function update_play()
         step_snake()
     end
 
-    -- update golden apple
-    if golden_apple then
-        golden_timer -= 1
-        -- golden sparkles
-        if t % 4 == 0 then
-            local gx, gy = grid_to_px(golden_apple.x, golden_apple.y)
-            add_particle(gx + rnd(4), gy + rnd(4), 10, rnd(0.6)-0.3, -rnd(0.5), 15)
-        end
+    update_food()
+end
 
-        if golden_timer <= 0 then
-            -- puff of smoke when golden apple expires
-            local gx, gy = grid_to_px(golden_apple.x, golden_apple.y)
-            for i = 1, 6 do
-                add_particle(gx + 2, gy + 2, 6, rnd(1)-0.5, rnd(1)-0.5, 12)
-            end
-            golden_apple = nil
+function update_gameover()
+    gameover_timer += 1
+    if gameover_timer > 20 and (btnp(4) or btnp(5)) then
+        sfx(4)
+        start_new_game()
+    end
+end
+
+function _draw()
+    apply_camera_shake()
+    cls(0)
+
+    if state == "title" then
+        draw_title()
+    else
+        draw_playfield()
+        draw_food()
+        draw_snake()
+        draw_particles()
+        draw_hud()
+
+        if state == "gameover" then
+            draw_gameover()
         end
     end
+end
+
+-- =============================================
+-- 3. snake mechanics & collisions
+-- =============================================
+
+function init_snake()
+    snake = {
+        {x = 7, y = 7},
+        {x = 6, y = 7},
+        {x = 5, y = 7}
+    }
+    dx = 1
+    dy = 0
+    input_q = {}
 end
 
 function queue_dir(ndx, ndy)
@@ -140,7 +175,7 @@ function queue_dir(ndx, ndy)
         last_d = input_q[#input_q]
     end
 
-    -- prevent 180-degree immediate reversal
+    -- prevent 180-degree self reversal
     if ndx != -last_d.dx or ndy != -last_d.dy then
         if ndx != last_d.dx or ndy != last_d.dy then
             if #input_q < 2 then
@@ -151,7 +186,6 @@ function queue_dir(ndx, ndy)
 end
 
 function step_snake()
-    -- apply next queued turn
     if #input_q > 0 then
         local next_d = deli(input_q, 1)
         dx = next_d.dx
@@ -168,7 +202,7 @@ function step_snake()
         return
     end
 
-    -- check self collision (exclude tail tip because it moves forward unless growing)
+    -- check self collision
     for i = 1, #snake - 1 do
         if nx == snake[i].x and ny == snake[i].y then
             die()
@@ -176,28 +210,25 @@ function step_snake()
         end
     end
 
-    -- move head forward
+    -- add new head segment
     add(snake, {x = nx, y = ny}, 1)
 
     local ate = false
 
-    -- check regular apple
-    if nx == apple.x and ny == apple.y then
+    -- regular apple collision
+    if apple and nx == apple.x and ny == apple.y then
         score += 10
         apples_eaten += 1
         ate = true
         sfx(0)
 
         local px, py = grid_to_px(apple.x, apple.y)
-        for i = 1, 10 do
-            add_particle(px + 2, py + 2, 8, rnd(2)-1, rnd(2)-1, 16)
-            add_particle(px + 2, py + 2, 14, rnd(1.5)-0.75, rnd(1.5)-0.75, 12)
-        end
+        emit_burst(px + 4, py + 4, 8, 14, 12)
 
         -- speed scaling
-        move_delay = max(3, base_delay - flr(apples_eaten / 4))
+        move_delay = max(4, base_delay - flr(apples_eaten / 3))
 
-        -- spawn golden apple every 5 regular apples
+        -- spawn golden apple every 5 apples
         if apples_eaten % 5 == 0 and not golden_apple then
             spawn_golden_apple()
         end
@@ -205,24 +236,20 @@ function step_snake()
         spawn_apple()
     end
 
-    -- check golden apple
+    -- golden apple collision
     if golden_apple and nx == golden_apple.x and ny == golden_apple.y then
-        local bonus = 50 + flr(golden_timer / 10)
+        local bonus = 50 + flr(golden_timer / 6)
         score += bonus
         ate = true
         sfx(1)
 
         local px, py = grid_to_px(golden_apple.x, golden_apple.y)
-        for i = 1, 16 do
-            add_particle(px + 2, py + 2, 10, rnd(2.5)-1.25, rnd(2.5)-1.25, 20)
-            add_particle(px + 2, py + 2, 9, rnd(2)-1, rnd(2)-1, 16)
-            add_particle(px + 2, py + 2, 7, rnd(1.5)-0.75, rnd(1.5)-0.75, 12)
-        end
+        emit_burst(px + 4, py + 4, 10, 9, 16)
 
         golden_apple = nil
     end
 
-    -- remove tail if didn't eat
+    -- remove tail if no food eaten
     if not ate then
         deli(snake)
     end
@@ -230,19 +257,18 @@ end
 
 function die()
     sfx(2)
-    shake = 8
+    shake = 10
     state = "gameover"
     gameover_timer = 0
 
-    -- segment explosion particles
+    -- explode snake segments into debris
     for i = 1, #snake do
         local s = snake[i]
         local sx, sy = grid_to_px(s.x, s.y)
-        add_particle(sx + 2, sy + 2, 11, rnd(2)-1, rnd(2)-1, 25)
-        if (i % 2 == 0) add_particle(sx + 2, sy + 2, 3, rnd(2)-1, rnd(2)-1, 20)
+        emit_burst(sx + 4, sy + 4, 11, 3, 4)
     end
 
-    -- update high score
+    -- record high score
     if score > high_score then
         high_score = score
         dset(0, high_score)
@@ -250,20 +276,23 @@ function die()
     end
 end
 
-function update_gameover()
-    gameover_timer += 1
-    if gameover_timer > 20 and (btnp(4) or btnp(5)) then
-        sfx(4)
-        start_new_game()
-    end
+function get_head_sprite(cdx, cdy)
+    if cdx == 1  then return SPR_HEAD_RIGHT end
+    if cdx == -1 then return SPR_HEAD_LEFT  end
+    if cdy == -1 then return SPR_HEAD_UP    end
+    if cdy == 1  then return SPR_HEAD_DOWN  end
+    return SPR_HEAD_RIGHT
 end
 
 -- =============================================
--- food spawning
+-- 4. food & golden apple management
 -- =============================================
+
 function is_cell_occupied(gx, gy)
-    for s in all(snake) do
-        if (s.x == gx and s.y == gy) return true
+    if snake then
+        for s in all(snake) do
+            if (s.x == gx and s.y == gy) return true
+        end
     end
     if golden_apple and golden_apple.x == gx and golden_apple.y == gy then
         return true
@@ -295,13 +324,33 @@ function spawn_golden_apple()
     until (not is_cell_occupied(gx, gy)) or attempts > 100
 
     golden_apple = {x = gx, y = gy}
-    golden_timer = 300 -- 5 seconds at 60fps
+    golden_timer = 360 -- 6 seconds at 60fps
     sfx(3)
 end
 
+function update_food()
+    if golden_apple then
+        golden_timer -= 1
+
+        -- sparkles around golden apple
+        if t % 5 == 0 then
+            local gx, gy = grid_to_px(golden_apple.x, golden_apple.y)
+            add_particle(gx + 2 + rnd(4), gy + 2 + rnd(4), 10, rnd(0.6)-0.3, -rnd(0.6), 18)
+        end
+
+        -- timeout
+        if golden_timer <= 0 then
+            local gx, gy = grid_to_px(golden_apple.x, golden_apple.y)
+            emit_burst(gx + 4, gy + 4, 6, 5, 8)
+            golden_apple = nil
+        end
+    end
+end
+
 -- =============================================
--- particle system
+-- 5. particles & screen juice
 -- =============================================
+
 function add_particle(x, y, col, vx, vy, max_life)
     add(particles, {
         x = x,
@@ -312,6 +361,17 @@ function add_particle(x, y, col, vx, vy, max_life)
         life = max_life,
         max_life = max_life
     })
+end
+
+function emit_burst(x, y, c1, c2, count)
+    for i = 1, count do
+        local col = (i % 2 == 0) and c1 or c2
+        local angle = rnd(1)
+        local speed = 0.5 + rnd(1.5)
+        local vx = cos(angle) * speed
+        local vy = sin(angle) * speed
+        add_particle(x, y, col, vx, vy, 12 + flr(rnd(10)))
+    end
 end
 
 function update_particles()
@@ -328,22 +388,14 @@ end
 function draw_particles()
     for p in all(particles) do
         local c = p.col
-        if p.life < p.max_life * 0.3 then
+        if p.life < p.max_life * 0.25 then
             c = 5 -- fade to dark gray
         end
         pset(p.x, p.y, c)
     end
 end
 
--- =============================================
--- drawing & rendering
--- =============================================
-function grid_to_px(gx, gy)
-    return ox + (gx - 1) * cell_sz, oy + (gy - 1) * cell_sz
-end
-
-function _draw()
-    -- apply screen shake
+function apply_camera_shake()
     if shake > 0 then
         local cam_x = rnd(shake * 2) - shake
         local cam_y = rnd(shake * 2) - shake
@@ -351,26 +403,17 @@ function _draw()
     else
         camera(0, 0)
     end
+end
 
-    cls(0)
+-- =============================================
+-- 6. sprite rendering & UI
+-- =============================================
 
-    if state == "title" then
-        draw_title()
-    else
-        draw_playfield()
-        draw_apples()
-        draw_snake()
-        draw_particles()
-        draw_hud()
-
-        if state == "gameover" then
-            draw_gameover()
-        end
-    end
+function grid_to_px(gx, gy)
+    return ox + (gx - 1) * cell_sz, oy + (gy - 1) * cell_sz
 end
 
 function draw_playfield()
-    -- outer board boundary (colors 5 and 6)
     local bx1 = ox - 2
     local by1 = oy - 2
     local bx2 = ox + grid_w * cell_sz + 1
@@ -380,38 +423,41 @@ function draw_playfield()
     rect(bx1 - 1, by1 - 1, bx2 + 1, by2 + 1, 1)
 
     -- subtle background grid dots
-    for gx = 1, grid_w, 2 do
-        for gy = 1, grid_h, 2 do
+    for gx = 1, grid_w do
+        for gy = 1, grid_h do
             local px, py = grid_to_px(gx, gy)
-            pset(px + 1, py + 1, 1)
+            pset(px + 3, py + 3, 1)
         end
     end
 end
 
 function draw_hud()
     -- top HUD bar
-    rectfill(0, 0, 127, 11, 1)
-    line(0, 11, 127, 11, 5)
+    rectfill(0, 0, 127, 13, 1)
+    line(0, 13, 127, 13, 5)
 
-    -- score & high score
-    print("SCORE:", 3, 3, 6)
-    print(score, 28, 3, 7)
+    -- score with apple icon sprite
+    spr(SPR_APPLE, 2, 2)
+    print(score, 12, 4, 7)
 
-    print("BEST:", 82, 3, 6)
-    print(high_score, 103, 3, (score >= high_score and score > 0) and 10 or 7)
+    -- length
+    print("L:"..#snake, 48, 4, 6)
+
+    -- high score with trophy sprite
+    spr(SPR_TROPHY, 82, 2)
+    print(high_score, 92, 4, (score >= high_score and score > 0) and 10 or 7)
 
     -- golden apple timer bar if active
     if golden_apple and state == "play" then
-        local bar_w = flr((golden_timer / 300) * 24)
+        local bar_w = flr((golden_timer / 360) * 18)
         local col = (golden_timer < 60 and (t % 6 < 3)) and 8 or 10
-        rectfill(52, 4, 52 + bar_w, 7, col)
-        rect(51, 3, 77, 8, 9)
+        rectfill(62, 4, 62 + bar_w, 8, col)
+        rect(61, 3, 81, 9, 9)
     end
 end
 
 function draw_snake()
-    if state == "gameover" and gameover_timer > 10 then
-        -- don't draw snake after death explosion
+    if state == "gameover" and gameover_timer > 15 then
         return
     end
 
@@ -421,126 +467,80 @@ function draw_snake()
         local sx, sy = grid_to_px(s.x, s.y)
 
         if i == 1 then
-            -- snake head
-            rectfill(sx, sy, sx + 3, sy + 3, 11)
-            pset(sx, sy, 3)
-            pset(sx + 3, sy, 3)
-            pset(sx, sy + 3, 3)
-            pset(sx + 3, sy + 3, 3)
-
-            -- directional eyes
-            local e1x, e1y, e2x, e2y, p1x, p1y, p2x, p2y
-            if dx == 1 then
-                e1x, e1y = sx + 2, sy
-                e2x, e2y = sx + 2, sy + 2
-                p1x, p1y = sx + 3, sy
-                p2x, p2y = sx + 3, sy + 2
-            elseif dx == -1 then
-                e1x, e1y = sx + 1, sy
-                e2x, e2y = sx + 1, sy + 2
-                p1x, p1y = sx, sy
-                p2x, p2y = sx, sy + 2
-            elseif dy == -1 then
-                e1x, e1y = sx, sy + 1
-                e2x, e2y = sx + 2, sy + 1
-                p1x, p1y = sx, sy
-                p2x, p2y = sx + 2, sy
-            else
-                e1x, e1y = sx, sy + 2
-                e2x, e2y = sx + 2, sy + 2
-                p1x, p1y = sx, sy + 3
-                p2x, p2y = sx + 2, sy + 3
+            -- snake head sprite
+            local spr_id = get_head_sprite(dx, dy)
+            if state == "gameover" then
+                spr_id = SPR_DEAD_HEAD
             end
-
-            -- eyes white & pupil
-            pset(e1x, e1y, 7)
-            pset(e2x, e2y, 7)
-            pset(p1x, p1y, 0)
-            pset(p2x, p2y, 0)
-
-            -- tongue flick animation (every ~2 seconds)
-            if (t % 120 > 100) and (t % 10 < 6) then
-                local tx = sx + dx * 4 + (dy != 0 and 1 or 0)
-                local ty = sy + dy * 4 + (dx != 0 and 1 or 0)
-                pset(tx, ty, 8)
-            end
+            spr(spr_id, sx, sy)
+        elseif i == len and len > 2 then
+            -- snake tail sprite
+            spr(SPR_TAIL, sx, sy)
         else
-            -- snake body (alternating shade pattern)
-            local col = (i % 2 == 0) and 11 or 3
-            rectfill(sx, sy, sx + 3, sy + 3, col)
-            pset(sx + 1, sy + 1, (i % 2 == 0) and 10 or 11)
+            -- snake body segment sprite
+            spr(SPR_BODY, sx, sy)
         end
     end
 end
 
-function draw_apples()
-    -- regular apple
+function draw_food()
+    -- regular apple sprite (with gentle bob)
     if apple then
         local ax, ay = grid_to_px(apple.x, apple.y)
-        rectfill(ax, ay + 1, ax + 3, ay + 3, 8)
-        pset(ax, ay + 1, 0)
-        pset(ax + 3, ay + 1, 0)
-        pset(ax + 1, ay, 11)   -- leaf
-        pset(ax + 1, ay + 1, 14) -- highlight
+        local bob = flr(sin(t / 25) * 1)
+        spr(SPR_APPLE, ax, ay + bob)
     end
 
-    -- golden apple
+    -- golden apple sprite
     if golden_apple then
         local gax, gay = grid_to_px(golden_apple.x, golden_apple.y)
-        local flash_col = (t % 8 < 4) and 10 or 9
-        if (golden_timer < 60 and (t % 4 < 2)) flash_col = 7
-
-        rectfill(gax, gay + 1, gax + 3, gay + 3, flash_col)
-        pset(gax, gay + 1, 0)
-        pset(gax + 3, gay + 1, 0)
-        pset(gax + 1, gay, 7) -- stem / star point
-        pset(gax + 1, gay + 1, 7) -- bright center
+        spr(SPR_GOLDEN, gax, gay)
     end
 end
 
 function draw_title()
-    -- decorative background frame
+    -- decorative frame
     rect(6, 6, 121, 121, 5)
     rect(8, 8, 119, 119, 1)
 
-    -- retro drop shadow title
-    print("S N A K E", 39, 27, 3)
-    print("S N A K E", 38, 26, 11)
+    -- stylized title banner
+    print("S N A K E", 47, 25, 3)
+    print("S N A K E", 46, 24, 11)
+    print("P I C O - 8", 43, 36, 5)
 
-    print("P I C O - 8", 43, 38, 5)
-
-    -- animated title snake
+    -- animated title snake using sprites
     for i = 1, #title_snake do
         local s = title_snake[i]
-        local c = (i == 1) and 10 or ((i % 2 == 0) and 11 or 3)
-        rectfill(s.x, s.y, s.x + 3, s.y + 3, c)
         if i == 1 then
-            pset(s.x + 2, s.y + 1, 7)
-            pset(s.x + 3, s.y + 1, 0)
+            spr(SPR_HEAD_RIGHT, s.x, s.y)
+        elseif i == #title_snake then
+            spr(SPR_TAIL, s.x, s.y)
+        else
+            spr(SPR_BODY, s.x, s.y)
         end
     end
 
-    -- apple preview on title screen
-    rectfill(110, 91, 113, 93, 8)
-    pset(111, 90, 11)
+    -- apple preview sprite
+    spr(SPR_APPLE, 108, 86)
 
-    -- start prompt (blinking)
+    -- blinking start text
     if t % 40 < 25 then
-        print("PRESS ❎ TO PLAY", 32, 60, 7)
+        print("PRESS ❎ TO PLAY", 32, 56, 7)
     end
 
-    -- instructions
-    print("⬅️➡️⬆️⬇️ : MOVE", 36, 75, 6)
-    print("❎ (HOLD) : SPEED BOOST", 20, 106, 5)
+    -- controls
+    print("⬅️➡️⬆️⬇️ : MOVE", 36, 70, 6)
+    print("❎ (HOLD) : SPEED DASH", 18, 104, 5)
 
     -- best score
     if high_score > 0 then
-        print("BEST SCORE: "..high_score, 36, 114, 10)
+        spr(SPR_TROPHY, 34, 112)
+        print("BEST: "..high_score, 45, 113, 10)
     end
 end
 
 function draw_gameover()
-    -- semi-transparent box
+    -- semi-transparent backdrop
     fillp(0x5a5a)
     rectfill(16, 32, 111, 96, 0)
     fillp()
@@ -548,14 +548,16 @@ function draw_gameover()
     rect(16, 32, 111, 96, 8)
     rect(18, 34, 109, 94, 0)
 
-    print("G A M E   O V E R", 26, 40, 8)
+    -- dead head icon
+    spr(SPR_DEAD_HEAD, 24, 38)
+    print("GAME OVER", 44, 40, 8)
 
-    print("FINAL SCORE: "..score, 32, 54, 7)
-    print("BEST SCORE:  "..high_score, 32, 64, is_new_high and 10 or 6)
+    print("SCORE: "..score, 36, 54, 7)
+    print("BEST:  "..high_score, 36, 64, is_new_high and 10 or 6)
 
     if is_new_high then
         if t % 20 < 12 then
-            print("★ NEW BEST RECORD! ★", 21, 74, 10)
+            print("★ NEW BEST! ★", 38, 74, 10)
         end
     end
 
@@ -563,6 +565,16 @@ function draw_gameover()
         print("PRESS ❎ TO RETRY", 28, 85, 7)
     end
 end
+
+__gfx__
+000000000033330000880000003333000033330000333300000000000004bb000007bb000033330000aaaa005555555500000000000000000000000000000000
+0000000003b70bb303bbbb3003bbbb303bb07b3003bbba30003330000044b000007a900003707b300a7aa7a05666666500000000000000000000000000000000
+000000003bb00bbb3b7007b33bbbbbb3bbb00bb33babbbb303bbb300088888800aaaaaa03b070bb30aaaaaa05611116500000000000000000000000000000000
+000000003bbbbbb83b0000b33bbbbbb38bbbbbb33bbbbab33bbbb33088ee8888aa77aaaa3b707bb300aaaa005611116500000000000000000000000000000000
+000000003bbbbbb83bbbbbb33b0000b38bbbbbb33bbbbbb33bbbb33088ee8888aa7799aa3b707bb3000aa0005611116500000000000000000000000000000000
+000000003bb00bbb3bbbbbb33b7007b3bbb00bb33babbbb303bbb30088888888a999999a3b070bb3000aa0005611116500000000000000000000000000000000
+0000000003b70bb303bbbb3003bbbb303bb07b3003bbba3000333000088888800999999003707b3000aaaa005666666500000000000000000000000000000000
+000000000033330000333300008800000033330000333300000000000088880000999900003333000aaaaaa05555555500000000000000000000000000000000
 
 __sfx__
 00040000240602807030055000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
