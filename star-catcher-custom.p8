@@ -3,12 +3,20 @@ version 43
 __lua__
 -- 1. initialization
 function _init()
-  px = 64      -- player x position
-  py = 64      -- player y position
-  sx = 30      -- star x position
-  sy = 30      -- star y position
-  score = 0    -- player score
-  state=true
+  sfx(-1)
+  -- remove previous sound effects
+
+  px = 64
+  -- player x position
+  py = 64
+  -- player y position
+  sx = 30
+  -- star x position
+  sy = 30
+  -- star y position
+  score = 0
+  -- player score
+  state = true
 
   bullets = {}
   bullet_timer = 0
@@ -16,22 +24,31 @@ end
 
 -- 2. game logic & input
 function _update()
+  restart_game()
   -- arrow key controls (0=left, 1=right, 2=up, 3=down)
   if (btn(0)) px -= 2
   if (btn(1)) px += 2
   if (btn(2)) py -= 2
   if (btn(3)) py += 2
-  
   wall_collision_detection()
   star_collision_detection()
   update_bullets()
 end
 
+function restart_game()
+  if state == false then
+    if (btn(4) or btn(5)) then
+      _init()
+    end
+  end
+  return
+end
+
 function wall_collision_detection()
-  if px>128 or px<0 or py>128 or py<0 then
-  	if state==true then
+  if px > 128 or px < 0 or py > 128 or py < 0 then
+    if state == true then
       set_game_end()
-  	end
+    end
   end
 end
 
@@ -39,9 +56,9 @@ function star_collision_detection()
   -- collision detection (distance check)
   if abs(px - sx) < 6 and abs(py - sy) < 6 then
     score += 1
-    sx = flr(rnd(120))  -- random star x position
-    sy = flr(rnd(120))  -- random star y position
-    sfx(0)               -- play sound effect 0
+    sx = flr(rnd(120)) -- random star x position
+    sy = flr(rnd(120)) -- random star y position
+    sfx(0) -- play sound effect 0
   end
 end
 
@@ -50,17 +67,30 @@ function update_bullets()
 
   if bullet_timer > 30 then
     bullet_timer = 0
-    add(bullets, {x = flr(rnd(128)), y = 0, vy = 2})
+    spawn_bullet()
   end
 
   for b in all(bullets) do
-    b.y += b.vy
-    if abs(px - b.x) < 6 and abs(py-b.y) < 6 then
+    b.x += (b.vx or 0)
+    b.y += (b.vy or 0)
+    if abs(px - b.x) < 6 and abs(py - b.y) < 6 then
       set_game_end()
     end
-    if b.y > 128 then
+    if b.y > 128 or b.x > 128 or b.x < 0 or b.y < 0 then
       del(bullets, b)
     end
+  end
+end
+
+function spawn_bullet()
+  -- 0: top, 1: left, 2: right
+  local side = flr(rnd(3))
+  if side == 0 then
+    add(bullets, { x = flr(rnd(128)), y = 0, vx = 0, vy = 2 })
+  elseif side == 1 then
+    add(bullets, { x = 0, y = flr(rnd(128)), vx = 2, vy = 1 })
+  else
+    add(bullets, { x = 127, y = flr(rnd(128)), vx = -2, vy = 1 })
   end
 end
 
@@ -73,18 +103,22 @@ end
 
 -- 3. rendering / drawing
 function _draw()
-	if state==true then
+  if state == true then
     draw_normal_game_loop()
-	else
+  else
     draw_ending_screen()
-	end
+  end
 end
 
 function draw_normal_game_loop()
-  cls(1) -- clear screen with dark navy
-  spr(2,px, py) -- draw player
-  spr(1, sx, sy) -- draw star sprite at (sx, sy)
-  print("score: "..score, 4, 4, 7) -- display score text
+  cls(1)
+  -- clear screen with dark navy
+  spr(2, px, py)
+  -- draw player
+  spr(1, sx, sy)
+  -- draw star sprite at (sx, sy)
+  print("score: " .. score, 4, 4, 7)
+  -- display score text
   for b in all(bullets) do
     circfill(b.x, b.y)
   end
@@ -92,10 +126,9 @@ end
 
 function draw_ending_screen()
   cls(1)
-  print("gg", 56, 56, 7)
-  print("final score: "..score, 64, 64, 7)
+  print("final score: " .. score, 24, 64, 7)
+  print("press x to restart", 24, 76, 10)
 end
-
 
 __gfx__
 00000000000990000707707000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
